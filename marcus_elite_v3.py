@@ -15,7 +15,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 2. WATCHLIST
+# 2. WATCHLIST (Including Crypto for 24/7 Testing)
 tickers = ["BTC-USD", "ETH-USD", "TSLA", "NVDA", "VFF", "LFVN", "BABB", "MARS"]
 st.sidebar.header("🕹️ Marcus.Ai Control")
 ticker = st.sidebar.selectbox("🎯 Target Asset", tickers)
@@ -40,33 +40,36 @@ def get_live_data(symbol):
 
 df = get_live_data(ticker)
 
-if df is not None and len(df) > 15:
+if df is not None and len(df) > 20:
     # 4. AI PREDICTION MODEL
     df_ai = df.tail(20).reset_index()
     X = np.array(df_ai.index).reshape(-1, 1)
     y = df_ai['Close'].values
     ai_model = LinearRegression().fit(X, y)
-    prediction = ai_model.predict(np.array([[len(df_ai) + 5]]))[0]
+    
+    # FIX: Using .item() to convert numpy array to a single float number
+    raw_prediction = ai_model.predict(np.array([[len(df_ai) + 5]]))[0]
+    prediction = float(raw_prediction.item()) if hasattr(raw_prediction, 'item') else float(raw_prediction)
     slope = ai_model.coef_[0]
 
     # 5. PROFESSIONAL CANDLESTICK VISUALS
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
     
-    # Price Candles
+    # Candlestick Bars
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], 
         low=df['Low'], close=df['Close'], name="Price"
     ), row=1, col=1)
     
-    # Volume Bars
+    # Volume Bar
     fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume", marker_color='cyan', opacity=0.4), row=2, col=1)
     
     fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
     # 6. METRICS & AI SIGNAL ENGINE
-    curr_price = df['Close'].iloc[-1]
-    rsi = df['RSI'].iloc[-1]
+    curr_price = float(df['Close'].iloc[-1])
+    rsi = float(df['RSI'].iloc[-1])
     total_value = round(curr_price * qty, 2)
 
     col1, col2, col3 = st.columns(3)
@@ -89,5 +92,7 @@ if df is not None and len(df) > 15:
             st.error("🤖 AI: STRONG SELL")
         else:
             st.warning("🤖 AI: HOLD / WATCH")
+
 else:
-    st.info("🌙 Market is Resting. Switch to **BTC-USD** in the sidebar to see the AI trade Crypto live!")
+    st.header("🌙 Market is Resting")
+    st.info("💡 **Switch to BTC-USD** in the sidebar to see the AI trade Crypto live!")
