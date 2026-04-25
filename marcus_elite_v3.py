@@ -67,6 +67,7 @@ if not st.session_state.auth:
 else:
     user_name = st.session_state.user
     bal_res = supabase.table("users").select("balance").eq("username", user_name).execute()
+    # Fixed balance fetching
     current_balance = float(bal_res.data[0]['balance'])
 
     st.markdown(f"<h1>OPERATOR: {user_name.upper()}</h1>", unsafe_allow_html=True)
@@ -75,19 +76,19 @@ else:
     
     data = yf.download(ticker, period="1d", interval="1m")
     if not data.empty:
-        # Grab the very last price as a clean float
-        live_price = float(data['Close'].iloc[-1])
+        # THE NUCLEAR FIX: .values.flatten() grabs just the raw numbers, [-1] grabs the last one
+        live_price = float(data['Close'].values.flatten()[-1])
         
-        # FIX: Ensure slope is a single float value
-        y = data['Close'].values
+        y = data['Close'].values.flatten()
         x = range(len(y))
         raw_slope = (len(x) * (x * y).sum() - sum(x) * sum(y)) / (len(x) * (sum([i**2 for i in x])) - (sum(x)**2))
-        slope = float(raw_slope) # Forces it into a number
+        slope = float(raw_slope)
 
         m1, m2, m3 = st.columns(3)
         m1.metric("LIVE PRICE", f"${live_price:,.2f}", delta=f"{slope:.4f}")
         m2.metric("CASH", f"${current_balance:,.2f}")
         
+        # P/L FIX: Subtracting 100k starting capital
         total_pl = current_balance - 100000.0
         m3.metric("TOTAL P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color="normal")
 
