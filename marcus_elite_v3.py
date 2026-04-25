@@ -1,164 +1,145 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from sklearn.linear_model import LinearRegression
-from plotly.subplots import make_subplots
-from datetime import datetime
+import yfinance as yf
 from supabase import create_client, Client
 import hashlib
+from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# 1. 12-SECOND AUTO-REFRESH (Fast but stable)
-st_autorefresh(interval=12 * 1000, key="terminal_pulse")
+# --- CONFIGURATION & DATABASE ---
+st.set_page_config(page_title="Marcus.Ai Elite V4", layout="wide", initial_sidebar_state="expanded")
 
-# 2. CLOUD CONNECTION
-@st.cache_resource
+# 12-Second Heartbeat (Auto-Refresh)
+st_autorefresh(interval=12000, key="datarefresh")
+
 def init_supabase():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error("Missing Supabase Secrets! Add them in Streamlit Settings.")
+        st.stop()
 
 supabase: Client = init_supabase()
 
-# 3. MODERN TERMINAL STYLING (The "Glass" UI)
-st.set_page_config(page_title="Marcus.Ai Elite V4", layout="wide")
-st.markdown("""
-    <style>
-    .main { background-color: #0d1117; color: #c9d1d9; font-family: 'Inter', sans-serif; }
-    div[data-testid="stMetricValue"] { font-size: 28px; font-weight: 800; color: #58a6ff; }
-    .stButton>button { 
-        width: 100%; border-radius: 12px; height: 3.5em; 
-        background: linear-gradient(145deg, #1f242d, #161b22);
-        color: white; border: 1px solid #30363d; transition: 0.3s;
-    }
-    .stButton>button:hover { border-color: #58a6ff; box-shadow: 0px 0px 15px rgba(88, 166, 255, 0.3); }
-    .trade-card { background: #161b22; padding: 20px; border-radius: 15px; border: 1px solid #30363d; }
-    </style>
-    """, unsafe_allow_html=True)
+def make_hashes(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
-# 4. LOGIN / SIGNUP
-def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
-def check_hashes(password, hashed_text): return make_hashes(password) == hashed_text
+# --- AUTHENTICATION UI ---
+st.sidebar.title("🛡️ Marcus.Ai Secure Gateway")
+auth_mode = st.sidebar.selectbox("Mode", ["Login", "Sign Up"])
+u = st.sidebar.text_input("Username")
+p = st.sidebar.text_input("Password", type="password")
 
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+user_authenticated = False
+user_name = ""
+current_balance = 0.0
 
-if not st.session_state.logged_in:
-    st.title("🛡️ Marcus.Ai Secure Access")
-    mode = st.sidebar.selectbox("Gate", ["Login", "Sign Up"])
-    u = st.text_input("User")
-    p = st.text_input("Pass", type='password')
-    if st.button("Initialize Terminal"):
-        if mode == "Login":
-            res = supabase.table("users").select("password").eq("username", u).execute()
-            if res.data and check_hashes(p, res.data[0]['password']):
-                st.session_state.logged_in, st.session_state.username = True, u
-                st.rerun()
-            else: st.error("Access Denied")
+if auth_mode == "Sign Up":
+    if st.sidebar.button("Initialize Terminal"):
+        try:
+            h_p = make_hashes(p)
+            supabase.table("users").insert({"username": u, "password": h_p, "balance": 100000.0}).execute()
+            st.sidebar.success("Account Created! Switch to Login.")
+        except:
+            st.sidebar.error("Username already exists or Database Error.")
+
+if auth_mode == "Login":
+    if u and p:
+        res = supabase.table("users").select("*").eq("username", u).execute()
+        if res.data:
+            if res.data[0]['password'] == make_hashes(p):
+                user_authenticated = True
+                user_name = u
+                current_balance = res.data[0]['balance']
+            else:
+                st.sidebar.error("Access Denied: Invalid Credentials")
         else:
-            supabase.table("users").insert({"username": u, "password": make_hashes(p), "balance": 100000.0}).execute()
-            st.success("Access Granted. Switch to Login.")
-    st.stop()
+            st.sidebar.error("User not found.")
 
-# 5. FETCH DATA & LIVE PRICE
-user_name = st.session_state.username
-user_data = supabase.table("users").select("balance").eq("username", user_name).execute().data[0]
-current_balance = float(user_data['balance'])
-
-tickers = ["BTC-USD", "ETH-USD", "SOL-USD", "NVDA", "TSLA", "AAPL", "PLTR", "BABB", "LFVN"]
-ticker = st.sidebar.selectbox("🎯 Active Ticker", sorted(tickers))
-qty = st.sidebar.number_input("Order Quantity", min_value=1, value=10)
-
-@st.cache_data(ttl=10)
-def get_data(symbol):
-    data = yf.download(symbol, period="1d", interval="1m", progress=False)
-    if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
-    return data
-
-df = get_data(ticker)
-
-if df is not None and not df.empty:
-    curr_price = float(df['Close'].values[-1])
+# --- MAIN TERMINAL INTERFACE ---
+if user_authenticated:
+    st.title(f"📈 MARCUS ELITE V4 // OPERATOR: {user_name.upper()}")
     
-    # 6. AI SIGNAL LOGIC
-    df_ai = df.tail(15).reset_index()
-    X = np.array(df_ai.index).reshape(-1, 1)
-    y = df_ai['Close'].values.flatten()
-    slope = LinearRegression().fit(X, y).coef_[0]
+    # 1. Sidebar Controls
+    ticker = st.sidebar.selectbox("Select Asset", ["BTC-USD", "NVDA", "AAPL", "TSLA", "ETH-USD", "MSFT"])
+    qty = st.sidebar.number_input("Quantity", min_value=1, value=1)
     
-    # UI HEADER
-    st.title(f"⚡ {user_name}'s Terminal")
-    st.write(f"Monitoring **{ticker}** | Auto-Refresh: 12s")
+    # 2. Fetch Live Market Data
+    data = yf.download(ticker, period="1d", interval="1m")
+    if data.empty:
+        st.error("Market Data Offline.")
+        st.stop()
+        
+    live_price = data['Close'].iloc[-1]
     
-    # TOP METRICS BAR
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Live Price", f"${curr_price:,.2f}")
+    # 3. AI Signal Logic (Linear Regression)
+    y = data['Close'].values
+    x = range(len(y))
+    slope = (len(x) * (x * y).sum() - sum(x) * sum(y)) / (len(x) * (sum([i**2 for i in x])) - (sum(x)**2))
+    
+    if slope > 0.01:
+        signal, color = "📈 STRONG BUY", "#00FF00"
+    elif slope < -0.01:
+        signal, color = "📉 STRONG SELL", "#FF0000"
+    else:
+        signal, color = "⚖️ HOLD", "#808080"
+
+    # 4. Top Metrics Bar
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Live Price", f"${live_price:,.2f}", delta=f"{slope:.4f}")
     m2.metric("Portfolio Cash", f"${current_balance:,.2f}")
     
-    # 7. PROFIT/LOSS CALCULATION
-    history_res = supabase.table("trades").select("*").eq("username", user_name).execute()
-    history_df = pd.DataFrame(history_res.data)
-    
-    total_pl = 0
-    if not history_df.empty:
-        # Simple Logic: Current Value of all BUYS vs Sells
-        buys = history_df[history_df['type'] == 'BUY']
-        sells = history_df[history_df['type'] == 'SELL']
-        # You can expand this logic, but for now we'll show total cash flow
-        total_pl = current_balance - 100000.0
-    
-    pl_color = "normal" if total_pl >= 0 else "inverse"
-    m3.metric("Total P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color=pl_color)
-    
-    with m4:
-        if slope > 0.001: st.success("📈 STRONG BUY")
-        elif slope < -0.001: st.error("📉 STRONG SELL")
-        else: st.warning("⚖️ HOLD")
+    # FIX: P/L calculation based on the initial 100k seed money
+    total_pl = current_balance - 100000.0
+    # delta_color="normal" ensures negatives are Red and positives are Green
+    m3.metric("Total P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color="normal")
 
-    # 8. TRADING CONTROLS
-    col_main, col_side = st.columns([3, 1])
-    
-    with col_main:
-        fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
-        fig.update_layout(height=450, template="plotly_dark", margin=dict(l=0,r=0,t=0,b=0), xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+    # 5. Charting
+    st.subheader(f"{ticker} Real-Time Analysis")
+    st.line_chart(data['Close'])
 
-    with col_side:
-        st.markdown('<div class="trade-card">', unsafe_allow_html=True)
-        st.write("### Execution")
-        if st.button("🚀 EXECUTE BUY"):
-            cost = curr_price * qty
-            if current_balance >= cost:
-                supabase.table("users").update({"balance": current_balance - cost}).eq("username", user_name).execute()
-                supabase.table("trades").insert({
-                    "username": user_name, "date": datetime.now().strftime("%Y-%m-%d"),
-                    "time": datetime.now().strftime("%H:%M:%S"), "symbol": ticker,
-                    "type": "BUY", "qty": qty, "price": curr_price, "total": cost
-                }).execute()
-                st.rerun()
-        
-        if st.button("🔥 EXECUTE SELL"):
-            gain = curr_price * qty
-            supabase.table("users").update({"balance": current_balance + gain}).eq("username", user_name).execute()
+    # 6. Trade Execution
+    st.sidebar.markdown(f"### AI Signal: <span style='color:{color}'>{signal}</span>", unsafe_allow_html=True)
+    
+    col_buy, col_sell = st.sidebar.columns(2)
+    
+    if col_buy.button("EXECUTE BUY"):
+        cost = live_price * qty
+        if current_balance >= cost:
+            new_bal = current_balance - cost
+            supabase.table("users").update({"balance": new_bal}).eq("username", user_name).execute()
             supabase.table("trades").insert({
-                "username": user_name, "date": datetime.now().strftime("%Y-%m-%d"),
-                "time": datetime.now().strftime("%H:%M:%S"), "symbol": ticker,
-                "type": "SELL", "qty": qty, "price": curr_price, "total": gain
+                "username": user_name, "symbol": ticker, "type": "BUY", 
+                "qty": qty, "price": float(live_price), "total": float(cost),
+                "date": datetime.now().strftime("%Y-%m-%d"), "time": datetime.now().strftime("%H:%M:%S")
             }).execute()
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.error("Insufficient Funds")
 
-    # 9. MODERN LEDGER
-    st.divider()
-    st.subheader("📜 Live Trading Ledger")
-    if not history_df.empty:
-        # Calculate Live Gain/Loss per row
-        history_df = history_df.sort_values('id', ascending=False)
-        st.dataframe(history_df[['date', 'time', 'symbol', 'type', 'qty', 'price', 'total']], use_container_width=True)
+    if col_sell.button("EXECUTE SELL"):
+        revenue = live_price * qty
+        new_bal = current_balance + revenue
+        supabase.table("users").update({"balance": new_bal}).eq("username", user_name).execute()
+        supabase.table("trades").insert({
+            "username": user_name, "symbol": ticker, "type": "SELL", 
+            "qty": qty, "price": float(live_price), "total": float(revenue),
+            "date": datetime.now().strftime("%Y-%m-%d"), "time": datetime.now().strftime("%H:%M:%S")
+        }).execute()
+        st.rerun()
+
+    # 7. Live Trading Ledger (Multi-user)
+    st.markdown("---")
+    st.subheader("📊 Global Live Trading Ledger")
+    history = supabase.table("trades").select("*").order("created_at", desc=True).limit(50).execute()
+    if history.data:
+        df_ledger = pd.DataFrame(history.data)[['username', 'date', 'time', 'symbol', 'type', 'qty', 'price', 'total']]
+        st.dataframe(df_ledger, use_container_width=True)
     else:
-        st.info("No trades detected. Execute your first order to see the ledger.")
+        st.info("No trades executed yet.")
 
-if st.sidebar.button("Secure Logout"):
-    st.session_state.logged_in = False
-    st.rerun()
+else:
+    st.warning("Please Login or Sign Up via the sidebar to access the Elite Terminal.")
+    st.image("https://images.unsplash.com/photo-1611974717482-53907361a93e?auto=format&fit=crop&q=80&w=1000", caption="Marcus AI Pro Terminal v4.0")
