@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import plotly.graph_objects as go
 from supabase import create_client, Client
 import hashlib
 from datetime import datetime
@@ -71,7 +72,6 @@ else:
 
     st.markdown(f"<h1>OPERATOR: {user_name.upper()}</h1>", unsafe_allow_html=True)
     
-    # 75+ TICKER LIST RESTORED
     tickers = [
         "BTC-USD", "ETH-USD", "SOL-USD", "NVDA", "AAPL", "TSLA", "AMD", "MSFT", "GOOGL", "AMZN", 
         "META", "NFLX", "COIN", "MARA", "RIOT", "MSTR", "PLTR", "BABA", "NIO", "XPEV", 
@@ -102,8 +102,23 @@ else:
         total_pl = current_balance - 100000.0
         m3.metric("TOTAL P/L", f"${total_pl:,.2f}", delta=f"{total_pl:,.2f}", delta_color="normal")
 
-        # BAR CHART RESTORED
-        st.bar_chart(data['Close'])
+        # --- CANDLESTICK CHART ---
+        fig = go.Figure(data=[go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            increasing_line_color='#00ff00', 
+            decreasing_line_color='#ff0000'
+        )])
+        fig.update_layout(
+            template="plotly_dark",
+            xaxis_rangeslider_visible=False,
+            height=500,
+            margin=dict(l=10, r=10, t=10, b=10)
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
         if st.sidebar.button("EXECUTE BUY"):
             cost = live_price * qty
