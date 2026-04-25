@@ -84,28 +84,41 @@ else:
         y = df['Close'].values.flatten()
         slope = float((len(y) * (range(len(y)) * y).sum() - sum(range(len(y))) * sum(y)) / (len(y) * (sum([i**2 for i in range(len(y))])) - (sum(range(len(y)))**2)))
 
-        # --- AI SIGNAL LOGIC (BUY/SELL) ---
-        short_ema = df['Close'].ewm(span=9, adjust=False).mean().iloc[-1]
-        long_ema = df['Close'].ewm(span=21, adjust=False).mean().iloc[-1]
-        
-        if slope > 0 and short_ema > long_ema: ai_signal = "🟢 STRONG BUY"
-        elif slope < 0 and short_ema < long_ema: ai_signal = "🔴 STRONG SELL"
-        else: ai_signal = "🟡 HOLD / NEUTRAL"
+        # --- SIGNALS ---
+        short_ema = df['Close'].ewm(span=9).mean().iloc[-1]
+        long_ema = df['Close'].ewm(span=21).mean().iloc[-1]
+        if slope > 0 and short_ema > long_ema: ai_sig = "🟢 BUY"
+        elif slope < 0 and short_ema < long_ema: ai_sig = "🔴 SELL"
+        else: ai_sig = "🟡 HOLD"
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("LIVE PRICE", f"${live_p:,.2f}", delta=f"{slope:.4f}")
-        c2.metric("AI SIGNAL", ai_signal)
+        c2.metric("SIGNAL", ai_sig)
         c3.metric("CASH", f"${balance:,.2f}")
         c4.metric("TOTAL P/L", f"${(balance-100000):,.2f}", delta=f"{(balance-100000):,.2f}", delta_color="normal")
 
-        # --- CHART ---
+        # --- CANDLESTICKS ---
         fig = go.Figure(data=[go.Candlestick(
             x=df.index, open=df['Open'].values.flatten(), high=df['High'].values.flatten(),
             low=df['Low'].values.flatten(), close=df['Close'].values.flatten(),
             increasing_line_color='#00ff00', decreasing_line_color='#ff0000'
         )])
-        fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=500, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+        fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=450, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, width='stretch', theme=None)
 
         if st.sidebar.button("EXECUTE BUY"):
-            if
+            if balance >= (live_p * qty):
+                new_bal = balance - (live_p * qty)
+                supabase.table("users").update({"balance": new_bal}).eq("username", user).execute()
+                supabase.table("trades").insert({"username": user, "symbol": ticker, "type": "BUY", "qty": qty, "price": live_p, "total": (live_p * qty), "date": datetime.now().strftime("%Y-%m-%d"), "time": datetime.now().strftime("%H:%M:%S")}).execute()
+                st.rerun()
+
+        if st.sidebar.button("EXECUTE SELL"):
+            new_bal = balance + (live_p * qty)
+            supabase.table("users").update({"balance": new_bal}).eq("username", user).execute()
+            supabase.table("trades").insert({"username": user, "symbol": ticker, "type": "SELL", "qty": qty, "price": live_p, "total": (live_p * qty), "date": datetime.now().strftime("%Y-%m-%d"), "time": datetime.now().strftime("%H:%M:%S")}).execute()
+            st.rerun()
+
+    st.markdown("---")
+    hist = supabase.table("trades").select("*").order("created_at", desc=True).limit(10).execute()
+    if hist.data: st.dataframe(pd.DataFrame(hist.data)[['username', 'symbol', 'type', 'qty', 'price', 'total']], width='stretch')
